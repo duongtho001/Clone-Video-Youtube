@@ -1,0 +1,5 @@
+{
+  "name": "Content Factory AI V03",
+  "description": "An AI-powered tool to transform YouTube videos into detailed scripts, asset lists, and JSON prompts for video generation.",
+  "requestFramePermissions": []
+}
