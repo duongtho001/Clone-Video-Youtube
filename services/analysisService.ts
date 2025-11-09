@@ -1,4 +1,5 @@
-import { GoogleGenAI, GeminiAsset, Type } from "@google/genai";
+// Fix: Removed GeminiAsset from this import as it's not exported from @google/genai.
+import { GoogleGenAI, Type } from "@google/genai";
 import {
     AnalysisState,
     StepStatus,
@@ -7,6 +8,8 @@ import {
     VideoMetadata,
     GeminiScene,
     StoryOutline,
+    // Fix: Added GeminiAsset to this import from the local types definition.
+    GeminiAsset,
 } from '../types';
 import { fetchVideoMetadata } from './youtubeService';
 
