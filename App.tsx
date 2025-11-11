@@ -300,7 +300,7 @@ const App: React.FC = () => {
 
             <main className="container mx-auto p-4 md:p-8">
                 {appStatus === 'idle' && (
-                    <UrlInputForm onAnalyze={handleBatchAnalyze} isAnalyzing={false} />
+                    <UrlInputForm onAnalyze={handleBatchAnalyze} isAnalyzing={false} apiKeys={apiKeys} />
                 )}
 
                 {appStatus !== 'idle' && (

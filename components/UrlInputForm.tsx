@@ -7,11 +7,12 @@ import { LoadingSpinner } from './icons/LoadingSpinner';
 interface UrlInputFormProps {
     onAnalyze: (urls: string[], style: string, summaryDurationMinutes?: number, variationPrompt?: string) => void;
     isAnalyzing: boolean;
+    apiKeys: string[];
 }
 
 const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[\w-]{11}(&\S*)?$/;
 
-const UrlInputForm: React.FC<UrlInputFormProps> = ({ onAnalyze, isAnalyzing }) => {
+const UrlInputForm: React.FC<UrlInputFormProps> = ({ onAnalyze, isAnalyzing, apiKeys }) => {
     const [urls, setUrls] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [style, setStyle] = useState('cinematic');
@@ -71,6 +72,10 @@ const UrlInputForm: React.FC<UrlInputFormProps> = ({ onAnalyze, isAnalyzing }) =
     };
     
     const handleGenerateSuggestions = async () => {
+        if (apiKeys.length === 0) {
+            setSuggestionError('Vui lòng thêm API Key trong phần Cài đặt để sử dụng tính năng này.');
+            return;
+        }
         const firstUrl = urls.split('\n').map(u => u.trim()).find(Boolean);
         if (!firstUrl || !YOUTUBE_URL_REGEX.test(firstUrl)) {
             setSuggestionError('Vui lòng nhập một URL YouTube hợp lệ vào dòng đầu tiên để nhận gợi ý.');
@@ -80,7 +85,7 @@ const UrlInputForm: React.FC<UrlInputFormProps> = ({ onAnalyze, isAnalyzing }) =
         setSuggestionError(null);
         setSuggestions([]);
         try {
-            const ideas = await generateStoryIdeas(firstUrl);
+            const ideas = await generateStoryIdeas(firstUrl, apiKeys);
             setSuggestions(ideas);
         } catch (err) {
             setSuggestionError(err instanceof Error ? err.message : 'Không thể tạo gợi ý.');

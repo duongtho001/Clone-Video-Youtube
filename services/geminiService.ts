@@ -29,39 +29,61 @@ export const sendChatMessage = async (message: string): Promise<string> => {
 };
 
 
-export const generateStoryIdeas = async (videoUrl: string): Promise<string[]> => {
+export const generateStoryIdeas = async (videoUrl: string, apiKeys: string[]): Promise<string[]> => {
+    if (!apiKeys || apiKeys.length === 0) {
+        throw new Error("Vui lòng thêm API Key trong phần Cài đặt để sử dụng tính năng này.");
+    }
+
+    let metadata;
     try {
-        const metadata = await fetchVideoMetadata(videoUrl);
+        metadata = await fetchVideoMetadata(videoUrl);
         if (!metadata || !metadata.videoId) {
             throw new Error("Không thể lấy siêu dữ liệu video để tạo gợi ý.");
         }
-
-        const prompt = `Dựa trên video có tiêu đề "${metadata.title}", hãy đề xuất 3 ý tưởng ngắn gọn, trong một câu cho một cuộc phiêu lưu hoặc câu chuyện hoàn toàn mới có các nhân vật chính. Chỉ trả về một mảng chuỗi JSON hợp lệ.`;
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.STRING
-                    }
-                }
-            },
-        });
-        
-        const jsonString = response.text;
-        const ideas = JSON.parse(jsonString);
-        
-        if (Array.isArray(ideas) && ideas.every(item => typeof item === 'string')) {
-            return ideas;
-        } else {
-            throw new Error("Phản hồi AI không phải là một mảng chuỗi hợp lệ.");
-        }
-    } catch (error) {
-        console.error("Error generating story ideas:", error);
-        throw new Error("Không thể tạo gợi ý từ AI. Vui lòng thử lại.");
+    } catch (metaError) {
+         console.error("Error fetching video metadata for story ideas:", metaError);
+         throw new Error("Không thể lấy siêu dữ liệu video để tạo gợi ý.");
     }
+
+    const prompt = `Dựa trên video có tiêu đề "${metadata.title}", hãy đề xuất 3 ý tưởng ngắn gọn, trong một câu cho một cuộc phiêu lưu hoặc câu chuyện hoàn toàn mới có các nhân vật chính. Chỉ trả về một mảng chuỗi JSON hợp lệ.`;
+    
+    let lastError: any;
+
+    for (const key of apiKeys) {
+        try {
+            const localAi = new GoogleGenAI({ apiKey: key });
+            const response = await localAi.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: prompt,
+                config: {
+                    responseMimeType: 'application/json',
+                    responseSchema: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.STRING
+                        }
+                    }
+                },
+            });
+            
+            const jsonString = response.text;
+            const ideas = JSON.parse(jsonString);
+            
+            if (Array.isArray(ideas) && ideas.every(item => typeof item === 'string')) {
+                return ideas; // Success!
+            } else {
+                 lastError = new Error("Phản hồi AI không phải là một mảng chuỗi hợp lệ.");
+                 continue; // Try next key
+            }
+        } catch (error) {
+            lastError = error;
+            console.warn(`API key starting with "${key.substring(0, 4)}..." failed for story idea generation. Error:`, error);
+        }
+    }
+
+    console.error("All API keys failed for story idea generation. Last error:", lastError);
+    if (lastError?.message?.toLowerCase().includes('quota')) {
+        throw new Error("Không thể tạo gợi ý từ AI. Tất cả các API Key đã cung cấp đều đã hết hạn mức.");
+    }
+    throw new Error("Không thể tạo gợi ý từ AI. Vui lòng kiểm tra lại API Keys của bạn.");
 };
