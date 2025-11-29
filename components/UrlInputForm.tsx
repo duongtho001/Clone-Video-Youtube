@@ -10,7 +10,7 @@ interface UrlInputFormProps {
     apiKeys: string[];
 }
 
-const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[\w-]{11}(&\S*)?$/;
+const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[\w-]{11}(\S*)?$/;
 
 const UrlInputForm: React.FC<UrlInputFormProps> = ({ onAnalyze, isAnalyzing, apiKeys }) => {
     const [urls, setUrls] = useState('');

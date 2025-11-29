@@ -10,15 +10,19 @@ const getVideoId = (url: string): string | null => {
         if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('music.youtube.com')) {
             const videoId = urlObj.searchParams.get('v');
             if (videoId) return videoId;
+            // Handles https://www.youtube.com/shorts/...
+            if (urlObj.pathname.includes('/shorts/')) {
+                return urlObj.pathname.split('/').filter(Boolean).pop() || null;
+            }
         }
         // Handles https://youtu.be/...
         if (urlObj.hostname === 'youtu.be') {
-            return urlObj.pathname.substring(1);
+            return urlObj.pathname.split('/').filter(Boolean).pop() || null;
         }
         return null;
     } catch (e) {
         // Fallback for URLs that are not full URLs but might contain the ID pattern
-        const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+        const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
         const match = url.match(regex);
         if (match) {
             return match[1];
