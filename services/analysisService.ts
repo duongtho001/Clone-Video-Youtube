@@ -1,3 +1,4 @@
+
 // Fix: Removed GeminiAsset from this import as it's not exported from @google/genai.
 import { GoogleGenAI, Type } from "@google/genai";
 import {
@@ -165,6 +166,7 @@ const getErrorMessage = (error: any): string => {
 
 const generateAndParseJsonWithRetry = async <T>(
     ai: GoogleGenAI, 
+    modelId: string,
     prompt: string,
     schema: any,
     maxRetries: number,
@@ -185,7 +187,7 @@ const generateAndParseJsonWithRetry = async <T>(
             }
             
             const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: modelId,
                 contents: prompt,
                 config: {
                     responseMimeType: 'application/json',
@@ -380,6 +382,7 @@ const sanitizeJsonString = (rawString: string): string => {
 export const runAnalysis = async (
     url: string,
     style: string,
+    modelId: string,
     outputDurationMinutes: number | undefined,
     variationPrompt: string | undefined,
     apiKeys: string[],
@@ -496,7 +499,7 @@ export const runAnalysis = async (
             const friendlyReason = reason.includes('json') ? 'Invalid response' : 'Model is overloaded';
             updateStep(4, StepStatus.PROCESSING, `AI Outline: ${friendlyReason}. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${attempt}/${MAX_RETRIES})`);
         };
-        const storyOutline: StoryOutline = await generateAndParseJsonWithRetry<StoryOutline>(ai, outlinePrompt, storyOutlineSchema, MAX_RETRIES, onOutlineRetry);
+        const storyOutline: StoryOutline = await generateAndParseJsonWithRetry<StoryOutline>(ai, modelId, outlinePrompt, storyOutlineSchema, MAX_RETRIES, onOutlineRetry);
         updateStep(4, StepStatus.COMPLETE, JSON.stringify(storyOutline, null, 2));
 
 
@@ -536,7 +539,7 @@ export const runAnalysis = async (
                 };
 
                 try {
-                    parsedChunkJson = await generateAndParseJsonWithRetry<GeminiAnalysisResponse>(ai, prompt, responseSchema, MAX_RETRIES, onRetry);
+                    parsedChunkJson = await generateAndParseJsonWithRetry<GeminiAnalysisResponse>(ai, modelId, prompt, responseSchema, MAX_RETRIES, onRetry);
                     chunkCompleted = true; // Success, exit while loop
                 } catch (error) {
                     if (error instanceof QuotaError) {

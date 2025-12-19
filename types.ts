@@ -1,3 +1,4 @@
+
 export enum StepStatus {
     PENDING,
     PROCESSING,
@@ -136,4 +137,5 @@ export interface LibraryEntry {
     result?: GeminiAnalysisResponse;
     status: 'pending' | 'processing' | 'complete' | 'error';
     error?: string;
+    modelId?: string; // Model used for analysis
 }

@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import UrlInputForm from './components/UrlInputForm';
 import AnalysisView from './components/AnalysisView';
@@ -81,7 +82,7 @@ const App: React.FC = () => {
         }
     };
 
-    const handleBatchAnalyze = useCallback(async (urls: string[], style: string, summaryDurationMinutes?: number, variationPrompt?: string) => {
+    const handleBatchAnalyze = useCallback(async (urls: string[], style: string, modelId: string, summaryDurationMinutes?: number, variationPrompt?: string) => {
         if (apiKeys.length === 0) {
             alert("Vui lòng thêm ít nhất một API Key trong phần Cài đặt trước khi phân tích.");
             setSettingsModalOpen(true);
@@ -103,6 +104,7 @@ const App: React.FC = () => {
                         thumbnail_url: meta.thumbnail_url,
                         createdAt: Date.now(),
                         status: 'pending',
+                        modelId: modelId
                     };
                 } catch (e) {
                     return {
@@ -163,7 +165,7 @@ const App: React.FC = () => {
 
             try {
                 await runAnalysis(
-                    entry.url, style, summaryDurationMinutes, variationPrompt, [...apiKeys], // Pass a copy of keys
+                    entry.url, style, modelId, summaryDurationMinutes, variationPrompt, [...apiKeys], // Pass a copy of keys
                     (state) => setAnalysisState(state),
                     (result) => {
                         setAnalysisResult(result);
@@ -175,7 +177,7 @@ const App: React.FC = () => {
                         };
                         idbService.updateHistoryEntry(completeEntry);
                         setLibrary(prev => prev.map(item => item.id === completeEntry.id ? completeEntry : item));
-                        startChat(JSON.stringify(result));
+                        startChat(JSON.stringify(result), modelId);
                         setChatMessages([{ sender: 'ai', text: `Đã phân tích xong "${currentMeta.title}". Bạn muốn hỏi gì về video này?` }]);
                     },
                     handleAllKeysExhausted

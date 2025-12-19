@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { YouTubeIcon } from './icons/YouTubeIcon';
 import { generateStoryIdeas } from '../services/geminiService';
@@ -5,17 +6,26 @@ import { SparklesIcon } from './icons/SparklesIcon';
 import { LoadingSpinner } from './icons/LoadingSpinner';
 
 interface UrlInputFormProps {
-    onAnalyze: (urls: string[], style: string, summaryDurationMinutes?: number, variationPrompt?: string) => void;
+    onAnalyze: (urls: string[], style: string, modelId: string, summaryDurationMinutes?: number, variationPrompt?: string) => void;
     isAnalyzing: boolean;
     apiKeys: string[];
 }
 
 const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[\w-]{11}(\S*)?$/;
 
+const GEMINI_MODELS = [
+    { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro Preview (Mạnh nhất)' },
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview (Mặc định)' },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
+];
+
 const UrlInputForm: React.FC<UrlInputFormProps> = ({ onAnalyze, isAnalyzing, apiKeys }) => {
     const [urls, setUrls] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [style, setStyle] = useState('cinematic');
+    const [modelId, setModelId] = useState('gemini-3-flash-preview');
     
     // Summary duration state
     const [summaryDuration, setSummaryDuration] = useState('');
@@ -61,7 +71,7 @@ const UrlInputForm: React.FC<UrlInputFormProps> = ({ onAnalyze, isAnalyzing, api
         }
         
         setError(null);
-        onAnalyze(urlList, style, isVariationMode ? undefined : duration, isVariationMode ? variationPrompt : undefined);
+        onAnalyze(urlList, style, modelId, isVariationMode ? undefined : duration, isVariationMode ? variationPrompt : undefined);
     };
 
     const handleUrlChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -85,7 +95,7 @@ const UrlInputForm: React.FC<UrlInputFormProps> = ({ onAnalyze, isAnalyzing, api
         setSuggestionError(null);
         setSuggestions([]);
         try {
-            const ideas = await generateStoryIdeas(firstUrl, apiKeys);
+            const ideas = await generateStoryIdeas(firstUrl, apiKeys, modelId);
             setSuggestions(ideas);
         } catch (err) {
             setSuggestionError(err instanceof Error ? err.message : 'Không thể tạo gợi ý.');
@@ -138,24 +148,40 @@ const UrlInputForm: React.FC<UrlInputFormProps> = ({ onAnalyze, isAnalyzing, api
                             </p>
                         </div>
 
-                        <div>
-                            <label htmlFor="output-style" className="block text-sm font-medium text-gray-600 mb-1">Phong cách đầu ra</label>
-                            <select
-                                id="output-style"
-                                value={style}
-                                onChange={(e) => setStyle(e.target.value)}
-                                className="w-full bg-gray-50 border border-gray-300 rounded-md px-4 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-red-500 outline-none transition-colors"
-                                disabled={isAnalyzing}
-                            >
-                                <option value="cinematic">Điện ảnh (Cinematic)</option>
-                                <option value="anime">Hoạt hình (Anime)</option>
-                                <option value="documentary">Tài liệu (Documentary)</option>
-                                <option value="black-and-white-film">Phim trắng đen</option>
-                                <option value="minecraft">Minecraft</option>
-                                <option value="3d">Hoạt hình 3D</option>
-                                <option value="2d">Hoạt hình 2D</option>
-                                <option value="japanese-1980s">Hoạt hình Nhật Bản 1980s</option>
-                            </select>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label htmlFor="model-select" className="block text-sm font-medium text-gray-600 mb-1">Model AI sử dụng</label>
+                                <select
+                                    id="model-select"
+                                    value={modelId}
+                                    onChange={(e) => setModelId(e.target.value)}
+                                    className="w-full bg-gray-50 border border-gray-300 rounded-md px-4 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-red-500 outline-none transition-colors"
+                                    disabled={isAnalyzing}
+                                >
+                                    {GEMINI_MODELS.map(m => (
+                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label htmlFor="output-style" className="block text-sm font-medium text-gray-600 mb-1">Phong cách đầu ra</label>
+                                <select
+                                    id="output-style"
+                                    value={style}
+                                    onChange={(e) => setStyle(e.target.value)}
+                                    className="w-full bg-gray-50 border border-gray-300 rounded-md px-4 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-red-500 outline-none transition-colors"
+                                    disabled={isAnalyzing}
+                                >
+                                    <option value="cinematic">Điện ảnh (Cinematic)</option>
+                                    <option value="anime">Hoạt hình (Anime)</option>
+                                    <option value="documentary">Tài liệu (Documentary)</option>
+                                    <option value="black-and-white-film">Phim trắng đen</option>
+                                    <option value="minecraft">Minecraft</option>
+                                    <option value="3d">Hoạt hình 3D</option>
+                                    <option value="2d">Hoạt hình 2D</option>
+                                    <option value="japanese-1980s">Hoạt hình Nhật Bản 1980s</option>
+                                </select>
+                            </div>
                         </div>
 
                         <div>

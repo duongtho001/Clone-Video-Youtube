@@ -1,13 +1,14 @@
+
 import { GoogleGenAI, Chat, Type } from "@google/genai";
 import { fetchVideoMetadata } from './youtubeService';
 
 let chat: Chat | null = null;
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
 
-export const startChat = (context: string) => {
+export const startChat = (context: string, modelId: string = 'gemini-3-flash-preview') => {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
     // The chat will be initialized with system instructions.
     chat = ai.chats.create({
-        model: 'gemini-2.5-flash',
+        model: modelId,
         config: {
             systemInstruction: `Bạn là một trợ lý AI hữu ích. Nhiệm vụ của bạn là trả lời các câu hỏi về một video đã được phân tích. Đây là bản phân tích video ở định dạng JSON:\n\n${context}\n\nDựa vào thông tin này, hãy trả lời câu hỏi của người dùng một cách ngắn gọn và chính xác.`,
         },
@@ -29,7 +30,7 @@ export const sendChatMessage = async (message: string): Promise<string> => {
 };
 
 
-export const generateStoryIdeas = async (videoUrl: string, apiKeys: string[]): Promise<string[]> => {
+export const generateStoryIdeas = async (videoUrl: string, apiKeys: string[], modelId: string = 'gemini-3-flash-preview'): Promise<string[]> => {
     if (!apiKeys || apiKeys.length === 0) {
         throw new Error("Vui lòng thêm API Key trong phần Cài đặt để sử dụng tính năng này.");
     }
@@ -53,7 +54,7 @@ export const generateStoryIdeas = async (videoUrl: string, apiKeys: string[]): P
         try {
             const localAi = new GoogleGenAI({ apiKey: key });
             const response = await localAi.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: modelId,
                 contents: prompt,
                 config: {
                     responseMimeType: 'application/json',
