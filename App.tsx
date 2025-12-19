@@ -11,7 +11,7 @@ import {
 } from './types';
 import { runAnalysis, QuotaError } from './services/analysisService';
 import { startChat, sendChatMessage } from './services/geminiService';
-import { fetchVideoMetadata } from './services/youtubeService';
+import { fetchVideoMetadata, fetchFileMetadata } from './services/youtubeService';
 import ApiKeyModal from './components/ApiKeyModal';
 import AiChat from './components/AiChat';
 import { LibraryItem } from './components/LibraryItem';
@@ -20,6 +20,7 @@ import { TrashIcon } from './components/icons/TrashIcon';
 import { LoadingSpinner } from './components/icons/LoadingSpinner';
 import SettingsModal from './components/SettingsModal';
 import { SettingsIcon } from './components/icons/SettingsIcon';
+import { SparklesIcon } from './components/icons/SparklesIcon';
 
 type AppStatus = 'idle' | 'processing' | 'finished';
 
@@ -29,271 +30,195 @@ const App: React.FC = () => {
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
     const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
     
-    // State for the currently processing video
     const [analysisState, setAnalysisState] = useState<AnalysisState | null>(null);
     const [videoMetadata, setVideoMetadata] = useState<VideoMetadata | null>(null);
     const [analysisError, setAnalysisError] = useState<string | null>(null);
     const [analysisResult, setAnalysisResult] = useState<GeminiAnalysisResponse | null>(null);
 
-
-    // State for chat
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [isChatLoading, setIsChatLoading] = useState(false);
 
-    // State for API Keys & Modals
     const [apiKeys, setApiKeys] = useState<string[]>([]);
     const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
     const [isQuotaModalOpen, setQuotaModalOpen] = useState(false);
     const [quotaPromiseResolve, setQuotaPromiseResolve] = useState<((key: string | null) => void) | null>(null);
 
-    // Load history and API keys from storage on mount
     useEffect(() => {
         async function loadData() {
-            // Load history
             try {
                 await idbService.initDB();
                 const history = await idbService.getHistory();
                 setLibrary(history);
             } catch (err) {
-                console.error("Failed to load history from IndexedDB:", err);
+                console.error(err);
             } finally {
                 setIsHistoryLoading(false);
             }
 
-            // Load API keys
             try {
                 const storedKeys = localStorage.getItem('geminiApiKeys');
-                if (storedKeys) {
-                    setApiKeys(JSON.parse(storedKeys));
-                }
+                if (storedKeys) setApiKeys(JSON.parse(storedKeys));
             } catch (err) {
-                console.error("Failed to load API keys from localStorage:", err);
+                console.error(err);
             }
         }
         loadData();
     }, []);
 
-    const handleSaveApiKeys = (keys: string[]) => {
-        setApiKeys(keys);
-        try {
-            localStorage.setItem('geminiApiKeys', JSON.stringify(keys));
-        } catch (err) {
-            console.error("Failed to save API keys to localStorage:", err);
-        }
+    const handleReset = () => {
+        setAppStatus('idle');
+        setAnalysisState(null);
+        setVideoMetadata(null);
+        setAnalysisError(null);
+        setAnalysisResult(null);
+        setChatMessages([]);
     };
 
-    const handleBatchAnalyze = useCallback(async (urls: string[], style: string, modelId: string, summaryDurationMinutes?: number, variationPrompt?: string) => {
+    const handleBatchAnalyze = useCallback(async (urls: string[], style: string, modelId: string, summaryDurationMinutes?: number, variationPrompt?: string, files?: File[]) => {
         if (apiKeys.length === 0) {
-            alert("Vui lòng thêm ít nhất một API Key trong phần Cài đặt trước khi phân tích.");
+            alert("Vui lòng thêm API Key trước.");
             setSettingsModalOpen(true);
             return;
         }
         
         setAppStatus('processing');
-
-        // Step 1: Create placeholder entries for all URLs
-        const initialEntries: LibraryEntry[] = await Promise.all(
-            urls.map(async (url) => {
+        const initialEntries: LibraryEntry[] = [];
+        
+        // Handle URLs
+        if (urls && urls.length > 0) {
+            for (const url of urls) {
                 try {
                     const meta = await fetchVideoMetadata(url);
-                    if (!meta.videoId) throw new Error('Could not get video metadata.');
-                    return {
+                    initialEntries.push({
                         id: `${meta.videoId}-${crypto.randomUUID()}`,
                         url,
                         title: meta.title,
                         thumbnail_url: meta.thumbnail_url,
                         createdAt: Date.now(),
                         status: 'pending',
-                        modelId: modelId
-                    };
+                        modelId
+                    });
                 } catch (e) {
-                    return {
-                        id: `failed-meta-${crypto.randomUUID()}`,
-                        url: url,
-                        title: "Không thể lấy siêu dữ liệu",
-                        thumbnail_url: '',
-                        createdAt: Date.now(),
-                        completedAt: Date.now(),
-                        status: 'error',
-                        error: e instanceof Error ? e.message : 'URL không hợp lệ hoặc không thể truy cập.',
-                    };
+                    console.error(e);
                 }
-            })
-        );
-        
-        // Add all to library state and DB
-        setLibrary(prev => [...initialEntries.sort((a,b) => b.createdAt - a.createdAt), ...prev]);
-        for (const entry of initialEntries) {
-            await idbService.addHistoryEntry(entry);
+            }
         }
 
-        setBatchProgress({ current: 0, total: urls.length });
+        // Handle Files
+        if (files && files.length > 0) {
+            for (const file of files) {
+                try {
+                    const meta = await fetchFileMetadata(file);
+                    initialEntries.push({
+                        id: meta.videoId,
+                        url: `file://${file.name}`,
+                        title: meta.title,
+                        thumbnail_url: meta.thumbnail_url,
+                        createdAt: Date.now(),
+                        status: 'pending',
+                        modelId,
+                        isLocalFile: true,
+                        localBlobUrl: meta.localBlobUrl
+                    });
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+        }
 
-        // Step 2: Sequentially process each pending entry
-        const entriesToProcess = initialEntries.filter(e => e.status !== 'error');
-        let processedCount = initialEntries.length - entriesToProcess.length;
+        if (initialEntries.length === 0) {
+            setAppStatus('idle');
+            return;
+        }
 
-        for (const entry of entriesToProcess) {
-            processedCount++;
-            setBatchProgress({ current: processedCount, total: urls.length });
+        setLibrary(prev => [...initialEntries, ...prev]);
+        setBatchProgress({ current: 0, total: initialEntries.length });
+
+        for (let i = 0; i < initialEntries.length; i++) {
+            const entry = initialEntries[i];
+            setBatchProgress(prev => ({ ...prev, current: i + 1 }));
             
-            // Reset per-video analysis state
+            let currentMeta: VideoMetadata;
+            if (entry.isLocalFile && entry.localBlobUrl) {
+                currentMeta = {
+                    videoId: entry.id,
+                    title: entry.title,
+                    thumbnail_url: entry.thumbnail_url,
+                    author_name: "Tệp nội bộ",
+                    hasCaptions: false,
+                    duration: (entry.result?.video_meta.duration_sec) || 0, 
+                    durationFormatted: 'N/A',
+                    localBlobUrl: entry.localBlobUrl
+                };
+            } else {
+                currentMeta = await fetchVideoMetadata(entry.url);
+            }
+            
+            setVideoMetadata(currentMeta);
             setAnalysisState(null);
             setAnalysisError(null);
             setAnalysisResult(null);
-            const currentMeta = await fetchVideoMetadata(entry.url); // Re-fetch to be safe
-            setVideoMetadata(currentMeta);
 
-            // Mark as 'processing'
-            const processingEntry: LibraryEntry = { ...entry, status: 'processing', createdAt: Date.now() };
-            setLibrary(prev => prev.map(item => item.id === processingEntry.id ? processingEntry : item));
-            await idbService.updateHistoryEntry(processingEntry);
-            
-            const handleAllKeysExhausted = (): Promise<string | null> => {
-                return new Promise((resolve) => {
-                    setQuotaModalOpen(true);
-                    setQuotaPromiseResolve(() => (newKey: string | null) => {
-                        if (newKey) {
-                            // Add the new key to the list for future use
-                            const updatedKeys = [...apiKeys, newKey];
-                            handleSaveApiKeys(updatedKeys);
-                        }
-                        resolve(newKey);
-                    });
-                });
-            };
+            const processingEntry: LibraryEntry = { ...entry, status: 'processing' };
+            setLibrary(prev => prev.map(item => item.id === entry.id ? processingEntry : item));
 
             try {
                 await runAnalysis(
-                    entry.url, style, modelId, summaryDurationMinutes, variationPrompt, [...apiKeys], // Pass a copy of keys
+                    currentMeta, style, modelId, summaryDurationMinutes, variationPrompt, [...apiKeys],
                     (state) => setAnalysisState(state),
                     (result) => {
                         setAnalysisResult(result);
-                        const completeEntry: LibraryEntry = {
-                            ...processingEntry,
-                            status: 'complete',
-                            completedAt: Date.now(),
-                            result,
-                        };
-                        idbService.updateHistoryEntry(completeEntry);
-                        setLibrary(prev => prev.map(item => item.id === completeEntry.id ? completeEntry : item));
+                        const completeEntry: LibraryEntry = { ...processingEntry, status: 'complete', completedAt: Date.now(), result };
+                        setLibrary(prev => prev.map(item => item.id === entry.id ? completeEntry : item));
+                        idbService.addHistoryEntry(completeEntry);
                         startChat(JSON.stringify(result), modelId);
-                        setChatMessages([{ sender: 'ai', text: `Đã phân tích xong "${currentMeta.title}". Bạn muốn hỏi gì về video này?` }]);
                     },
-                    handleAllKeysExhausted
+                    async () => {
+                        setQuotaModalOpen(true);
+                        return new Promise(resolve => setQuotaPromiseResolve(() => resolve));
+                    }
                 );
             } catch (error) {
-                 const errorMessage = error instanceof Error ? error.message : 'Đã xảy ra lỗi không xác định';
-                 setAnalysisError(errorMessage);
-                 console.error(`Failed to analyze ${entry.url}:`, error);
-
-                 const errorEntry: LibraryEntry = {
-                    ...processingEntry,
-                    status: 'error',
-                    completedAt: Date.now(),
-                    error: (error instanceof QuotaError && error.message === 'USER_CANCELLED')
-                        ? 'Phân tích đã bị hủy bởi người dùng.'
-                        : errorMessage
-                 };
-                 idbService.updateHistoryEntry(errorEntry);
-                 setLibrary(prev => prev.map(item => item.id === errorEntry.id ? errorEntry : item));
-            } finally {
-                setQuotaModalOpen(false);
-                setQuotaPromiseResolve(null);
+                const errorMessage = error instanceof Error ? error.message : 'Lỗi';
+                setAnalysisError(errorMessage);
+                const errorEntry: LibraryEntry = { ...processingEntry, status: 'error', error: errorMessage };
+                setLibrary(prev => prev.map(item => item.id === entry.id ? errorEntry : item));
             }
         }
         setAppStatus('finished');
     }, [apiKeys]);
 
-    const handleResumeAnalysis = (newKey: string) => {
-        if (quotaPromiseResolve) {
-            quotaPromiseResolve(newKey);
-        }
-    };
-
-    const handleCancelAnalysisFromQuotaModal = () => {
-         if (quotaPromiseResolve) {
-            quotaPromiseResolve(null); // Resolve with null to signal cancellation
-        }
-        handleResetForNewAnalysis();
-    }
-    
     const handleSendMessage = useCallback(async (message: string) => {
-        const lastSuccess = library.slice().find(item => item.status === 'complete');
-        if (!lastSuccess) return;
-
         setChatMessages(prev => [...prev, { sender: 'user', text: message }]);
         setIsChatLoading(true);
-
         try {
             const aiResponse = await sendChatMessage(message);
             setChatMessages(prev => [...prev, { sender: 'ai', text: aiResponse }]);
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Lỗi không xác định';
-            setChatMessages(prev => [...prev, { sender: 'ai', text: `Rất tiếc, đã xảy ra lỗi: ${errorMessage}` }]);
+            setChatMessages(prev => [...prev, { sender: 'ai', text: 'Lỗi khi gửi tin nhắn.' }]);
         } finally {
             setIsChatLoading(false);
         }
-    }, [library]);
-    
-    const handleResetForNewAnalysis = () => {
-        if (quotaPromiseResolve) {
-            quotaPromiseResolve(null); 
-        }
-        setAppStatus('idle');
-        setBatchProgress({ current: 0, total: 0 });
-        setAnalysisState(null);
-        setVideoMetadata(null);
-        setChatMessages([]);
-        setAnalysisError(null);
-        setAnalysisResult(null);
-        setQuotaModalOpen(false);
-        setQuotaPromiseResolve(null);
-    };
-
-    const handleDeleteItem = async (id: string) => {
-        try {
-            await idbService.deleteHistoryEntry(id);
-            setLibrary(prev => prev.filter(item => item.id !== id));
-        } catch (err) {
-            console.error("Failed to delete history item:", err);
-        }
-    };
-
-    const handleClearHistory = async () => {
-        if (window.confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử phân tích không?")) {
-            try {
-                await idbService.clearHistory();
-                setLibrary([]);
-            } catch (err) {
-                console.error("Failed to clear history:", err);
-            }
-        }
-    };
-    
-    const pendingCount = library.filter(item => item.status === 'pending').length;
+    }, []);
 
     return (
         <div className="bg-gray-100 text-gray-900 min-h-screen font-sans">
-            <header className="p-4 border-b border-gray-200 bg-white sticky top-0 z-10">
+            <header className="p-4 border-b border-gray-200 bg-white sticky top-0 z-20 shadow-sm">
                 <div className="container mx-auto flex justify-between items-center">
-                    <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-red-400">
-                        Trình Phân Tích Video Ai by Đường Thọ - 0934415387
-                    </h1>
-                     <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4">
+                        <h1 className="text-xl md:text-2xl font-black text-red-600 tracking-tighter">CF AI <span className="text-gray-400 font-light">V3</span></h1>
                         {appStatus !== 'idle' && (
                             <button 
-                                onClick={handleResetForNewAnalysis}
-                                className="px-4 py-2 bg-gray-200 text-gray-800 text-sm font-semibold rounded-md hover:bg-gray-300 transition-colors"
+                                onClick={handleReset}
+                                className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 transition-all border border-red-200"
                             >
-                               Phân tích danh sách khác
+                                <SparklesIcon className="w-3.5 h-3.5" />
+                                PHÂN TÍCH MỚI
                             </button>
                         )}
-                         <button 
-                            onClick={() => setSettingsModalOpen(true)}
-                            className="p-2 rounded-md hover:bg-gray-200 transition-colors"
-                            aria-label="Cài đặt API Keys"
-                        >
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => setSettingsModalOpen(true)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                             <SettingsIcon className="w-6 h-6 text-gray-600" />
                         </button>
                     </div>
@@ -306,101 +231,54 @@ const App: React.FC = () => {
                 )}
 
                 {appStatus !== 'idle' && (
-                    <div className="space-y-8">
-                        <div className="bg-white p-4 sm:p-6 rounded-lg border border-gray-200">
-                             <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                                Tiến trình hàng loạt
-                             </h2>
-                             {appStatus === 'processing' && (
-                                <p className="text-gray-600">
-                                    Đang xử lý video {batchProgress.current} trên {batchProgress.total}...
-                                </p>
-                             )}
-                             {appStatus === 'finished' && (
-                                 <p className="text-green-700 font-medium">
-                                    Đã hoàn tất xử lý {batchProgress.total} video.
-                                </p>
-                             )}
+                    <div className="space-y-8 animate-fade-in">
+                         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                             <div className="flex justify-between items-end mb-2">
+                                <h2 className="text-sm font-black text-gray-700 uppercase tracking-wider">Tiến độ ({batchProgress.current}/{batchProgress.total})</h2>
+                                <span className="text-xs font-bold text-red-600">{Math.round((batchProgress.current / batchProgress.total) * 100)}%</span>
+                             </div>
+                             <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden border border-gray-200">
+                                <div className="bg-gradient-to-r from-red-500 to-red-600 h-full transition-all duration-700 ease-out" style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}></div>
+                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
-                            <div className="lg:col-span-3 space-y-4">
-                                 <h2 className="text-xl font-semibold text-gray-800 border-b border-gray-200 pb-2">
-                                    Phân tích video hiện tại
-                                 </h2>
-                                <AnalysisView
-                                    analysisState={analysisState}
-                                    videoMetadata={videoMetadata}
-                                    error={analysisError}
-                                    finalResult={analysisResult}
-                                />
+                        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 items-start">
+                            <div className="lg:col-span-3">
+                                <AnalysisView analysisState={analysisState} videoMetadata={videoMetadata} error={analysisError} finalResult={analysisResult} />
                             </div>
-                            <div className="lg:col-span-2">
-                                <div className="sticky top-24">
-                                   <AiChat 
-                                        messages={chatMessages}
-                                        onSendMessage={handleSendMessage}
-                                        isLoading={isChatLoading || library.length === 0}
-                                   />
-                                </div>
+                            <div className="lg:col-span-2 sticky top-24">
+                                <AiChat messages={chatMessages} onSendMessage={handleSendMessage} isLoading={isChatLoading} />
                             </div>
                         </div>
                     </div>
                 )}
-                
-                <div className="mt-12">
-                     <div className="flex justify-between items-center mb-4">
-                        <div className="flex items-center gap-3">
-                            <h2 className="text-2xl font-semibold text-gray-800">Lịch sử Phân tích</h2>
-                            {pendingCount > 0 && (
-                                <span className="bg-gray-200 text-gray-800 text-xs font-medium px-2.5 py-1 rounded-full">
-                                    {pendingCount} đang chờ
-                                </span>
-                            )}
-                        </div>
-                        {library.length > 0 && (
-                            <button 
-                                onClick={handleClearHistory}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 text-gray-700 text-xs font-semibold rounded-md hover:bg-gray-300 transition-colors"
-                            >
-                                <TrashIcon className="w-4 h-4" />
-                                Xóa lịch sử
-                            </button>
-                        )}
+
+                <div className="mt-16 border-t border-gray-200 pt-8">
+                     <div className="flex items-center gap-2 mb-6">
+                        <div className="w-1.5 h-6 bg-red-600 rounded-full"></div>
+                        <h2 className="text-xl font-black text-gray-800 uppercase tracking-tight">Lịch sử Phân tích</h2>
                      </div>
                      {isHistoryLoading ? (
-                        <div className="text-center py-8">
-                            <LoadingSpinner className="w-8 h-8 mx-auto" />
-                            <p className="mt-2 text-gray-500">Đang tải lịch sử...</p>
-                        </div>
+                        <div className="flex justify-center p-12"><LoadingSpinner /></div>
                      ) : library.length > 0 ? (
-                        <div className="space-y-3">
-                            {library.map((item) => <LibraryItem key={item.id} item={item} onDelete={handleDeleteItem} />)}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {library.map((item) => <LibraryItem key={item.id} item={item} onDelete={(id) => {
+                                setLibrary(prev => prev.filter(i => i.id !== id));
+                                idbService.deleteHistoryEntry(id);
+                            }} />)}
                         </div>
-                     ) : (
-                        <div className="text-center py-8 bg-white border border-dashed border-gray-300 rounded-lg">
-                            <p className="text-gray-500">Chưa có lịch sử phân tích.</p>
-                            <p className="text-xs text-gray-400 mt-1">Các video bạn phân tích sẽ xuất hiện ở đây.</p>
-                        </div>
-                     )}
+                     ) : <div className="bg-white rounded-xl border border-dashed border-gray-300 p-12 text-center text-gray-400 font-medium">Chưa có dữ liệu phân tích nào.</div>}
                 </div>
             </main>
-
-             <footer className="text-center p-4 text-xs text-gray-500 border-t border-gray-200 mt-8">
-                Bản quyền của Đường Thọ
-            </footer>
-
-             <ApiKeyModal
-                isOpen={isQuotaModalOpen}
-                onContinue={handleResumeAnalysis}
-                onCancel={handleCancelAnalysisFromQuotaModal}
-            />
-             <SettingsModal
-                isOpen={isSettingsModalOpen}
-                onClose={() => setSettingsModalOpen(false)}
-                onSave={handleSaveApiKeys}
-                initialKeys={apiKeys}
-            />
+            
+            <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setSettingsModalOpen(false)} onSave={(keys) => { setApiKeys(keys); localStorage.setItem('geminiApiKeys', JSON.stringify(keys)); }} initialKeys={apiKeys} />
+            <ApiKeyModal isOpen={isQuotaModalOpen} onContinue={(key) => {
+                setQuotaModalOpen(false);
+                if (quotaPromiseResolve) quotaPromiseResolve(key);
+            }} onCancel={() => {
+                setQuotaModalOpen(false);
+                if (quotaPromiseResolve) quotaPromiseResolve(null);
+            }} />
         </div>
     );
 };

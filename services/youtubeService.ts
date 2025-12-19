@@ -1,3 +1,4 @@
+
 import type { VideoMetadata } from '../types';
 
 // Hardcoded API key for YouTube Data API v3
@@ -6,30 +7,41 @@ const YOUTUBE_API_KEY = 'AIzaSyDwTSvkH1mvEuXwjbnE8OqpBlI3SMZTbDk';
 const getVideoId = (url: string): string | null => {
     try {
         const urlObj = new URL(url);
-        // Handles https://www.youtube.com/watch?v=...
         if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('music.youtube.com')) {
             const videoId = urlObj.searchParams.get('v');
             if (videoId) return videoId;
-            // Handles https://www.youtube.com/shorts/...
             if (urlObj.pathname.includes('/shorts/')) {
                 return urlObj.pathname.split('/').filter(Boolean).pop() || null;
             }
         }
-        // Handles https://youtu.be/...
         if (urlObj.hostname === 'youtu.be') {
             return urlObj.pathname.split('/').filter(Boolean).pop() || null;
         }
         return null;
     } catch (e) {
-        // Fallback for URLs that are not full URLs but might contain the ID pattern
         const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
         const match = url.match(regex);
         if (match) {
             return match[1];
         }
-        console.error("Could not parse video URL", e);
         return null;
     }
+};
+
+const formatSeconds = (totalSeconds: number): string => {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+
+    const fmtHours = String(hours).padStart(2, '0');
+    const fmtMinutes = String(minutes).padStart(2, '0');
+    const fmtSeconds = String(seconds).padStart(2, '0');
+
+    let formatted = `${fmtMinutes}:${fmtSeconds}`;
+    if (hours > 0) {
+        formatted = `${fmtHours}:${formatted}`;
+    }
+    return formatted;
 };
 
 const parseISO8601Duration = (duration: string): { seconds: number, formatted: string } => {
@@ -42,27 +54,63 @@ const parseISO8601Duration = (duration: string): { seconds: number, formatted: s
     const seconds = parseInt(matches[3] || '0', 10);
 
     const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-    
-    const fmtHours = String(hours).padStart(2, '0');
-    const fmtMinutes = String(minutes).padStart(2, '0');
-    const fmtSeconds = String(seconds).padStart(2, '0');
-
-    let formatted = `${fmtMinutes}:${fmtSeconds}`;
-    if (hours > 0) {
-        formatted = `${fmtHours}:${formatted}`;
-    }
-
-    return { seconds: totalSeconds, formatted };
+    return { seconds: totalSeconds, formatted: formatSeconds(totalSeconds) };
 };
 
+export const fetchFileMetadata = (file: File): Promise<VideoMetadata> => {
+    return new Promise((resolve) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        const url = URL.createObjectURL(file);
+        
+        video.onloadedmetadata = () => {
+            const duration = video.duration;
+            
+            // Create a thumbnail by capturing a frame at 1 second (or 0 if very short)
+            video.currentTime = Math.min(1, duration / 2);
+            video.onseeked = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const thumbnailUrl = canvas.toDataURL('image/jpeg');
+                
+                resolve({
+                    videoId: 'local-' + crypto.randomUUID(),
+                    title: file.name,
+                    author_name: "Tệp nội bộ",
+                    thumbnail_url: thumbnailUrl,
+                    hasCaptions: false,
+                    duration: duration,
+                    durationFormatted: formatSeconds(duration),
+                    localBlobUrl: url
+                });
+            };
+        };
+
+        video.onerror = () => {
+            resolve({
+                videoId: 'local-error-' + crypto.randomUUID(),
+                title: "Tệp video không hợp lệ",
+                author_name: "Không rõ",
+                thumbnail_url: 'https://placehold.co/480x360/1e293b/94a3b8/png?text=Lỗi+đọc+tệp',
+                hasCaptions: false,
+                duration: 0,
+                durationFormatted: '00:00',
+            });
+        };
+
+        video.src = url;
+    });
+};
 
 export const fetchVideoMetadata = async (videoUrl: string): Promise<VideoMetadata> => {
     const videoId = getVideoId(videoUrl);
 
     if (!videoId) {
-        console.error("Could not extract video ID from URL:", videoUrl);
         return {
-            videoId: '',
+            videoId: 'invalid',
             title: "URL YouTube không hợp lệ",
             author_name: "Không rõ",
             thumbnail_url: 'https://placehold.co/480x360/1e293b/94a3b8/png?text=URL+không+hợp+lệ',
@@ -72,24 +120,15 @@ export const fetchVideoMetadata = async (videoUrl: string): Promise<VideoMetadat
         };
     }
     
-    if (!YOUTUBE_API_KEY) {
-        throw new Error("API key của YouTube Data API v3 chưa được cấu hình trong mã nguồn.");
-    }
-
     const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${YOUTUBE_API_KEY}`;
 
     try {
         const response = await fetch(apiUrl);
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(`Yêu cầu API YouTube thất bại với mã ${response.status}: ${errorData?.error?.message || 'Lỗi không xác định'}`);
-        }
+        if (!response.ok) throw new Error(`API YouTube error`);
         const data = await response.json();
         
         const videoItem = data.items?.[0];
-        if (!videoItem) {
-            throw new Error("Không tìm thấy video hoặc phản hồi không hợp lệ từ API YouTube");
-        }
+        if (!videoItem) throw new Error("Video not found");
         
         const snippet = videoItem.snippet;
         const contentDetails = videoItem.contentDetails;
@@ -106,15 +145,14 @@ export const fetchVideoMetadata = async (videoUrl: string): Promise<VideoMetadat
             durationFormatted: durationInfo.formatted,
         };
     } catch (error) {
-        console.error("Error fetching YouTube metadata via Data API:", error);
-        
+        // Fallback for API failure: we still have the videoId from the URL
         return {
             videoId: videoId,
-            title: "Tiêu đề Video (Không thể lấy)",
-            author_name: "Người tải lên (Không thể lấy)",
+            title: "Tiêu đề Video (Không thể lấy từ API)",
+            author_name: "YouTube Channel",
             thumbnail_url: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
             hasCaptions: false,
-            duration: 0,
+            duration: 0, // Fallback duration
             durationFormatted: 'N/A',
         };
     }

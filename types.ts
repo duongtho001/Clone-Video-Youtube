@@ -64,13 +64,14 @@ export interface ChatMessage {
 }
 
 export interface VideoMetadata {
-    videoId: string;
+    videoId: string; // "local" if from file
     title: string;
     author_name: string;
     thumbnail_url: string;
     hasCaptions: boolean;
     duration: number; // Duration in seconds
     durationFormatted: string; // Duration in hh:mm:ss format
+    localBlobUrl?: string; // URL for playing local files
 }
 
 // Type for the high-level story outline
@@ -128,14 +129,16 @@ export interface GeminiAnalysisResponse {
 }
 
 export interface LibraryEntry {
-    id: string; // youtube video id
-    url: string;
+    id: string; 
+    url: string; // original link or "file://filename"
     title: string;
     thumbnail_url: string;
-    createdAt: number; // Timestamp for sorting
-    completedAt?: number; // Timestamp for completion
+    createdAt: number; 
+    completedAt?: number; 
     result?: GeminiAnalysisResponse;
     status: 'pending' | 'processing' | 'complete' | 'error';
     error?: string;
-    modelId?: string; // Model used for analysis
+    modelId?: string; 
+    isLocalFile?: boolean;
+    localBlobUrl?: string;
 }
